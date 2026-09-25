@@ -1,0 +1,5 @@
+option,description
+project,Files inside the current project
+home_directory,Files in the home directory
+system,System files or services
+unclear,

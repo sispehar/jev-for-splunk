@@ -1,0 +1,14 @@
+[project]
+name = "jev-for-splunk"
+version = "0.1.0"
+description = "Jev for Splunk: ask TypeSafe Jev typed questions about any events from SPL (| jev noul|choice|score), with a KV store judgment cache."
+requires-python = ">=3.9"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["jev_for_splunk/bin", "jev_for_splunk/bin/lib", "tests/jev"]
+addopts = "-q"

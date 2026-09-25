@@ -1,0 +1,12 @@
+{
+  "id": "msg_battery",
+  "version": 1,
+  "description": "Customer messages (test fixture mirroring the shop battery)",
+  "state": {"message": "message"},
+  "required_state": ["message"],
+  "questions": {
+    "overcharged": {"type": "noul", "text": "The customer says they were charged more than they should have been"},
+    "area": {"type": "choice", "text": "Which part of the shop is this message about?", "options": "lookup:areas"},
+    "upset": {"type": "score", "text": "How upset is the customer?", "levels": "Calm; Annoyed; Angry"}
+  }
+}

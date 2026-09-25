@@ -1,0 +1,5 @@
+<nav search_view="search" color="#28b6a4">
+  <view name="jev_setup" default="true" />
+  <view name="jev_health" />
+  <view name="search" />
+</nav>

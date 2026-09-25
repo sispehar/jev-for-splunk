@@ -1,0 +1,18 @@
+# secrets
+.env
+.env.*
+!.env.example
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# build output
+dist/
+# vendored by scripts/build.sh (splunk-sdk 2.1.1); never committed
+*/bin/lib/splunklib/
+# splunk local overrides never ship
+*/local/
+*/metadata/local.meta
+# os
+.DS_Store

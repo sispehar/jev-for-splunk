@@ -1,0 +1,13 @@
+.jev-setup p { margin: 0 0 10px 0; }
+.jev-setup .jev-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0; }
+.jev-setup input#jev-key { min-width: 340px; height: 30px; padding: 0 8px; }
+.jev-setup .jev-hint { opacity: 0.8; font-size: 12px; }
+.jev-status { font-size: 12px; }
+.jev-status.ok { color: #28b6a4; }
+.jev-status.warn { color: #e6b24a; }
+.jev-status.fail { color: #f2643d; }
+.jev-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12px; }
+.jev-table th, .jev-table td { text-align: left; padding: 4px 6px; border-bottom: 1px solid rgba(128,128,128,0.3); vertical-align: top; }
+.jev-table td.ok { color: #28b6a4; font-weight: 600; }
+.jev-table td.warn { color: #e6b24a; font-weight: 600; }
+.jev-table td.fail { color: #f2643d; font-weight: 600; }

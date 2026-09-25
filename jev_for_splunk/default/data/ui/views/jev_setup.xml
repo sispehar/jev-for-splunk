@@ -1,0 +1,61 @@
+<form version="1.1" script="jev_setup.js" stylesheet="jev_setup.css" theme="dark">
+  <label>Setup</label>
+  <description>Store the TypeSafe API key for the | jev command, run the self-test, and try the three question types.</description>
+  <row>
+    <panel>
+      <title>1 · TypeSafe API key</title>
+      <html>
+        <div class="jev-setup">
+          <p>Create a key at <a href="https://console.typesafe.ai/keys" target="_blank" rel="noopener">console.typesafe.ai</a>.
+             It is stored encrypted in Splunk's credential store (<code>storage/passwords</code>, realm <code>jev_for_splunk</code>,
+             user <code>typesafe_api_key</code>) and read by <code>| jev</code> with the searching user's own session.
+             Only roles that hold <code>list_storage_passwords</code> can run the command; saving needs <code>admin_all_objects</code>.</p>
+          <div class="jev-row">
+            <input type="password" id="jev-key" placeholder="paste the key" autocomplete="off"/>
+            <button id="jev-save" class="btn btn-primary">Save key</button>
+            <span id="jev-key-status" class="jev-status"></span>
+          </div>
+          <p class="jev-hint">Stored key: <span id="jev-key-current">checking…</span></p>
+        </div>
+      </html>
+    </panel>
+    <panel>
+      <title>2 · Self-test</title>
+      <html>
+        <div class="jev-setup">
+          <p>Runs <code>| jevtest live=true</code>: Python, vendored SDK, configuration, every installed battery, the stored key,
+             connectivity to TypeSafe (one tiny paid request), the <code>jev_cache</code> KV store collection, and which app
+             answers <code>| jev</code>.</p>
+          <div class="jev-row">
+            <button id="jev-test" class="btn">Run self-test</button>
+            <span id="jev-test-status" class="jev-status"></span>
+          </div>
+          <table id="jev-test-table" class="jev-table">
+            <thead><tr><th>check</th><th>status</th><th>detail</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </html>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>3 · Try the three question types</title>
+      <html>
+        <div class="jev-setup">
+          <p>Every answer becomes a field. The three types return different shapes:</p>
+          <ul>
+            <li><b>noul</b>: the probability that a statement is true. Its sum over events is an expected count.<br/>
+              <code>| makeresults | eval message="My 20% code showed in the basket but I paid full price" | jev noul message "The customer says they were charged more than they should have been" as overcharged</code></li>
+            <li><b>choice</b>: one of your options, with a confidence.<br/>
+              <code>... | jev choice message "Which part of the shop is this about?" options="pricing: prices and discounts; delivery: shipping and tracking; other" as area</code></li>
+            <li><b>score</b>: a position on levels you describe, lowest first.<br/>
+              <code>... | jev score message "How upset is the customer?" levels="Calm question; Annoyed; Angry" as upset</code></li>
+          </ul>
+          <p class="jev-hint">Answers are cached per question in the KV store, so running a search again only pays for new events.
+             Add <code>dryrun=true</code> to preview tokens and cost. Do not use backticks inside a question: Splunk expands them as macros.</p>
+        </div>
+      </html>
+    </panel>
+  </row>
+</form>

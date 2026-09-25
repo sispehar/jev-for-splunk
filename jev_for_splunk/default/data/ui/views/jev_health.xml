@@ -1,0 +1,169 @@
+<dashboard version="2" theme="dark">
+    <label>Health</label>
+    <description>Self-test, usage, cost and cache effect.</description>
+    <definition><![CDATA[{
+    "title": "Jev for Splunk: health",
+    "description": "Self-test, usage, cost and cache effect.",
+    "inputs": {
+        "input_tr": {
+            "type": "input.timerange",
+            "title": "Time range",
+            "options": {
+                "token": "tr",
+                "defaultValue": "-24h@h,now"
+            }
+        }
+    },
+    "defaults": {
+        "dataSources": {
+            "ds.search": {
+                "options": {
+                    "queryParameters": {
+                        "earliest": "$tr.earliest$",
+                        "latest": "$tr.latest$"
+                    }
+                }
+            }
+        }
+    },
+    "visualizations": {
+        "table_test": {
+            "type": "splunk.table",
+            "title": "Self-test (| jevtest; add live=true on the Setup page for a paid round trip)",
+            "options": {
+                "count": 20,
+                "showInternalFields": false
+            },
+            "dataSources": {
+                "primary": "ds_test"
+            }
+        },
+        "chart_usage": {
+            "type": "splunk.column",
+            "title": "Answers per hour: fresh vs cached",
+            "options": {
+                "stackMode": "stacked"
+            },
+            "dataSources": {
+                "primary": "ds_usage"
+            }
+        },
+        "table_cost": {
+            "type": "splunk.table",
+            "title": "Tokens and cost by app and user",
+            "options": {
+                "count": 15,
+                "showInternalFields": false
+            },
+            "dataSources": {
+                "primary": "ds_cost"
+            }
+        },
+        "table_errors": {
+            "type": "splunk.table",
+            "title": "Warnings and errors in jev.log",
+            "options": {
+                "count": 15,
+                "showInternalFields": false
+            },
+            "dataSources": {
+                "primary": "ds_errors"
+            }
+        }
+    },
+    "dataSources": {
+        "ds_test": {
+            "type": "ds.search",
+            "name": "ds_test",
+            "options": {
+                "query": "| jevtest | table check status detail"
+            }
+        },
+        "ds_usage": {
+            "type": "ds.search",
+            "name": "ds_usage",
+            "options": {
+                "query": "`jev_internal_log` \"summary\" | timechart span=1h sum(fresh) AS \"judged now\" sum(kv_hits) AS \"from the KV cache\" sum(memo_hits) AS \"reused in the search\"",
+                "queryParameters": {
+                    "earliest": "$tr.earliest$",
+                    "latest": "$tr.latest$"
+                }
+            }
+        },
+        "ds_cost": {
+            "type": "ds.search",
+            "name": "ds_cost",
+            "options": {
+                "query": "`jev_internal_log` \"summary\" | stats sum(input_tokens) AS tokens BY app user | eval usd=`jev_cost_usd(tokens)` | sort - tokens",
+                "queryParameters": {
+                    "earliest": "$tr.earliest$",
+                    "latest": "$tr.latest$"
+                }
+            }
+        },
+        "ds_errors": {
+            "type": "ds.search",
+            "name": "ds_errors",
+            "options": {
+                "query": "`jev_internal_log` (level=ERROR OR level=WARNING) | stats count latest(_raw) AS example BY logger | sort - count",
+                "queryParameters": {
+                    "earliest": "$tr.earliest$",
+                    "latest": "$tr.latest$"
+                }
+            }
+        }
+    },
+    "layout": {
+        "type": "grid",
+        "options": {
+            "width": 1440,
+            "height": 916
+        },
+        "globalInputs": [
+            "input_tr"
+        ],
+        "structure": [
+            {
+                "item": "table_test",
+                "type": "block",
+                "position": {
+                    "x": 0,
+                    "y": 0,
+                    "w": 1440,
+                    "h": 340
+                }
+            },
+            {
+                "item": "chart_usage",
+                "type": "block",
+                "position": {
+                    "x": 0,
+                    "y": 352,
+                    "w": 856,
+                    "h": 300
+                }
+            },
+            {
+                "item": "table_cost",
+                "type": "block",
+                "position": {
+                    "x": 868,
+                    "y": 352,
+                    "w": 571,
+                    "h": 300
+                }
+            },
+            {
+                "item": "table_errors",
+                "type": "block",
+                "position": {
+                    "x": 0,
+                    "y": 664,
+                    "w": 1440,
+                    "h": 240
+                }
+            }
+        ]
+    }
+}]]></definition>
+</dashboard>

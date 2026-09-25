@@ -1,0 +1,32 @@
+{
+  "schemaVersion": "2.0.0",
+  "info": {
+    "title": "Jev for Splunk",
+    "id": {
+      "name": "jev_for_splunk",
+      "version": "0.1.0"
+    },
+    "author": [
+      {
+        "name": "Simon Spehar",
+        "email": "simon.spehar@flint.si",
+        "company": "Flint"
+      }
+    ],
+    "description": "Ask TypeSafe Jev typed questions about any events from SPL: | jev noul|choice|score returns calibrated probabilities, options and levels as fields, cached per question in the KV store.",
+    "classification": {
+      "categories": [
+        "IT Operations",
+        "Utilities"
+      ]
+    }
+  },
+  "supportedDeployments": [
+    "_standalone",
+    "_distributed",
+    "_search_head_clustering"
+  ],
+  "targetWorkloads": [
+    "_search_heads"
+  ]
+}
