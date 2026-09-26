@@ -28,22 +28,29 @@ is in [jev_for_splunk/README.md](jev_for_splunk/README.md).
 
 ## Install
 
-Requirements: Splunk Enterprise 9.x or 10.x with Python 3.9 or 3.13, the KV store enabled on the search
-head, outbound HTTPS from the search head to `api.typesafe.ai`, and a TypeSafe API key
-([console.typesafe.ai](https://console.typesafe.ai)).
+Requirements: Splunk Enterprise 9.3 or later (the command runs on Python 3.9, and on 3.13 from 10.2), the
+KV store enabled on the search head, outbound HTTPS from the search head to `api.typesafe.ai`, and a
+TypeSafe API key ([console.typesafe.ai](https://console.typesafe.ai)).
 
-1. Build the package:
+1. Download `jev_for_splunk-<version>.tar.gz` from the
+   [latest release](https://github.com/sispehar/jev-for-splunk/releases/latest) and install it on the
+   search head (**Apps > Manage Apps > Install app from file**), then restart Splunk. Indexers and
+   forwarders don't need it. To build the package from source instead:
    ```bash
    ./scripts/build.sh --appinspect     # dist/jev_for_splunk.tar.gz
    ```
-2. Install it on the search head (Apps > Manage Apps > Install app from file). Indexers and forwarders
-   don't need it.
-3. Open **Jev for Splunk > Setup**, paste the TypeSafe key and run the self-test.
-4. Read [Setup and permissions](jev_for_splunk/README.md#setup-and-permissions) for the capability
-   `| jev` needs and who can write the cache.
+2. Open **Jev for Splunk > Setup**, paste the TypeSafe key and run the self-test.
+3. Give the people who run `| jev` the **jev_user** role. They don't need `list_storage_passwords`; see
+   [Setup and permissions](jev_for_splunk/README.md#setup-and-permissions).
 
 `| jev` runs only on the search head, where the key, the cache and the outbound route are. It sends only
-the fields you name to `api.typesafe.ai`.
+the fields a search names, and the question, to `api.typesafe.ai`, billed to your TypeSafe account. No
+event data leaves Splunk until someone runs `| jev`. See TypeSafe's
+[Privacy Policy](https://typesafe.ai/legal/privacy-policy) and
+[Data Processing Agreement](https://typesafe.ai/legal/data-processing).
+
+This app is not on Splunkbase. *Jev for Splunk (unofficial)* on Splunkbase is a different app with the same
+folder name, so installing it on a search head replaces this one, and the reverse.
 
 ## Check the install
 
@@ -53,8 +60,8 @@ the fields you name to `api.typesafe.ai`.
 | a question | `\| makeresults \| eval message="My 20% code was accepted but I paid full price" \| jev noul message "The customer says they were charged more than they should have been" as overcharged` | `overcharged` above 0.8; run it again: `overcharged_cached=1` |
 | `=` in a question | `\| makeresults \| eval message="x" \| jev noul message "Is 2+2=4 stated?" as eq` | no "Unrecognized option" |
 
-The **Health** view shows the self-test, fresh answers against cached ones, cost by app and user, and
-warnings from `jev.log`.
+The **Health** view shows the self-test, fresh answers against cached ones, cost by app and user, which
+fields each search sent to TypeSafe, and warnings from `jev.log`.
 
 ## Limits
 
@@ -84,13 +91,17 @@ cd jev_for_splunk/bin && TYPESAFE_API_KEY=... python3 -m jev_core.cli ask noul m
 
 The last line runs the same code as the Splunk command, on NDJSON records, without Splunk.
 
+GitHub Actions runs the same build (tests, AppInspect, the package as an artifact) on every push and pull
+request, and a `v*` tag publishes the release ([docs/releasing.md](docs/releasing.md)).
+
 | path | what it is |
 |---|---|
-| `jev_for_splunk/` | the Splunk app: `\| jev` (noul, choice, score and batteries), a KV store judgment cache, a setup page, `\| jevtest`, a health view |
+| `jev_for_splunk/` | the Splunk app: `\| jev` (noul, choice, score and batteries), a KV store judgment cache, a setup page, `\| jevtest`, `\| jevpurge`, a health view |
 | `jev_for_splunk/bin/jev_core/` | the logic, standard library only, tested without Splunk |
-| `scripts/` | `build.sh` and `gen_dashboards.py` (the health view and nav) |
+| `scripts/` | `build.sh`, `gen_dashboards.py` (the health view and nav), `gen_icons.py` (the app icons) and `release_notes.py` |
 | `tests/` | the command (`tests/jev`) and the content rules (`tests/content`) |
 | `docs/architecture.md` | [how the command works](docs/architecture.md) |
+| `docs/releasing.md` | [how to cut a GitHub release](docs/releasing.md) |
 
 See [CLAUDE.md](CLAUDE.md) for the repository's conventions.
 

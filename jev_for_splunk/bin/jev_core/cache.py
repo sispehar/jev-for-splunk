@@ -114,6 +114,13 @@ class MemoryCache(object):
         for doc in docs:
             self.docs[doc["_key"]] = dict(doc)
 
+    def purge(self, before):
+        """Delete answers created before the epoch `before`; returns how many."""
+        old = [key for key, doc in self.docs.items() if float(doc.get("created") or 0) < before]
+        for key in old:
+            del self.docs[key]
+        return len(old)
+
 
 class SqliteCache(object):
     """File-backed cache for the CLI and local development (JEV_CACHE_PATH)."""
@@ -158,6 +165,14 @@ class SqliteCache(object):
         try:
             with self._lock, self._connect() as conn:
                 conn.executemany("INSERT OR REPLACE INTO jev_cache (key, created, doc) VALUES (?, ?, ?)", rows)
+        except sqlite3.Error as exc:
+            raise CacheReadOnly("sqlite: %s" % exc)
+
+    def purge(self, before):
+        """Delete answers created before the epoch `before`; returns how many."""
+        try:
+            with self._lock, self._connect() as conn:
+                return conn.execute("DELETE FROM jev_cache WHERE created < ?", (float(before),)).rowcount
         except sqlite3.Error as exc:
             raise CacheReadOnly("sqlite: %s" % exc)
 

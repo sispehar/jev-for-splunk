@@ -1,10 +1,9 @@
 []
 access = read : [ * ], write : [ admin, sc_admin ]
 
-# The command, its help and the macros are usable from any app (Search &
-# Reporting included). Running | jev still requires the searching user's role
-# to hold list_storage_passwords, because the command reads the TypeSafe key
-# from storage/passwords with the user's own session.
+# The commands, their help and the macros are usable from any app (Search &
+# Reporting included). Running | jev needs the use_jev capability (the jev_user
+# role in authorize.conf) or list_storage_passwords, to read the TypeSafe key.
 [commands]
 export = system
 
@@ -16,7 +15,7 @@ export = system
 
 # The judgment cache: readable and writable by the roles that can run | jev.
 [collections/jev_cache]
-access = read : [ admin, sc_admin ], write : [ admin, sc_admin ]
+access = read : [ admin, sc_admin, jev_user ], write : [ admin, sc_admin, jev_user ]
 export = system
 
 [transforms/jev_cache_lookup]

@@ -3,16 +3,19 @@ from __future__ import annotations
 
 import json
 import os
+import time
 
 import pytest
 
 from chunked_driver import all_messages, all_records, run_command
 from fake_jev_server import Handler, serve
+from jev_core.cache import SqliteCache, make_doc
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(os.path.dirname(HERE))
 JEV = os.path.join(REPO, "jev_for_splunk", "bin", "jev.py")
 JEVTEST = os.path.join(REPO, "jev_for_splunk", "bin", "jevtest.py")
+JEVPURGE = os.path.join(REPO, "jev_for_splunk", "bin", "jevpurge.py")
 APPS = os.path.join(HERE, "fixtures", "apps")
 APP = "jev_test_app"
 
@@ -226,6 +229,44 @@ def test_dryrun_sends_nothing(env):
     assert len(Handler.log) == 0, stderr
     assert out[0]["jev_error"] == "dryrun" and float(out[0]["jev_input_tokens"]) > 0
     assert any(level == "INFO" and "dry run" in text for level, text in all_messages(chunks))
+
+
+def test_dryrun_needs_no_key(env):
+    # no JEV_API_KEY and no splunkd to read one from: a dry run still estimates, a real run cannot
+    env = {k: v for k, v in env.items() if k != "JEV_API_KEY"}
+    _, chunks, stderr, _ = run(["noul", "message", OVERCHARGED, "as", "oc", "dryrun=true"], _messages(), env=env)
+    out = all_records(chunks)
+    assert out[0]["oc_error"] == "dryrun" and float(out[0]["oc_tokens"]) > 0, (all_messages(chunks), stderr)
+    assert not [text for level, text in all_messages(chunks) if level == "ERROR"] and len(Handler.log) == 0
+    _, chunks, _, _ = run(["noul", "message", OVERCHARGED, "as", "oc"], _messages()[:1], env=env)
+    assert all_records(chunks)[0]["oc_error"] == "setup_failed"
+
+
+def test_summary_names_the_fields_that_left_splunk(env, tmp_path):
+    (tmp_path / "var" / "log" / "splunk").mkdir(parents=True)
+    env = dict(env, SPLUNK_HOME=str(tmp_path))
+    run(["battery=cmd_risk", "cache=memo"], _cmd_records()[:1], env=env)
+    summary = [line for line in (tmp_path / "var" / "log" / "splunk" / "jev.log").read_text().splitlines()
+               if " summary " in line]
+    assert summary and 'state_fields="full_command,description,dangerouslyDisableSandbox"' in summary[-1], summary
+    assert "requests=1" in summary[-1] and 'label="battery cmd_risk"' in summary[-1]
+
+
+# -- purge ------------------------------------------------------------------------------
+
+def test_jevpurge_deletes_only_expired_answers(env):
+    cache = SqliteCache(env["JEV_CACHE_PATH"])
+    wire = {"type": "noul", "instructions": "x"}
+    now = time.time()
+    cache.put_many([make_doc(key, "m", wire, {"type": "noul", "noul": 0.5}, "m", 1, 1, 1, 1, created=now - age * 86400)
+                    for key, age in (("old", 40), ("new", 1))])
+    getinfo, chunks, stderr, _ = run_command(JEVPURGE, ["days=30"], [], env=env, app=APP)
+    assert getinfo.get("generating") is True, (getinfo, stderr)
+    row = all_records(chunks)[0]
+    assert row["status"] == "ok" and row["deleted"] == "1" and row["days"] == "30", (row, stderr)
+    assert list(cache.get_many(["old", "new"])) == ["new"]
+    getinfo, _, _, _ = run_command(JEVPURGE, ["days=0"], [], env=env, app=APP)   # refused before any chunk
+    assert ["ERROR", "Illegal value: days=0"] in getinfo["inspector"]["messages"], getinfo
 
 
 # -- self test ------------------------------------------------------------------------------

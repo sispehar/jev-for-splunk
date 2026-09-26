@@ -7,5 +7,5 @@ line (python -m jev_core.cli).
 """
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 USER_AGENT = "jev_for_splunk/" + __version__

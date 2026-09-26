@@ -1,6 +1,6 @@
 <form version="1.1" script="jev_setup.js" stylesheet="jev_setup.css" theme="dark">
   <label>Setup</label>
-  <description>Store the TypeSafe API key for the | jev command, run the self-test, and try the three question types.</description>
+  <description>Store the TypeSafe API key for the | jev command, run the self-test, adjust the settings, and try the three question types.</description>
   <row>
     <panel>
       <title>1 · TypeSafe API key</title>
@@ -8,14 +8,21 @@
         <div class="jev-setup">
           <p>Create a key at <a href="https://console.typesafe.ai/keys" target="_blank" rel="noopener">console.typesafe.ai</a>.
              It is stored encrypted in Splunk's credential store (<code>storage/passwords</code>, realm <code>jev_for_splunk</code>,
-             user <code>typesafe_api_key</code>) and read by <code>| jev</code> with the searching user's own session.
-             Only roles that hold <code>list_storage_passwords</code> can run the command; saving needs <code>admin_all_objects</code>.</p>
+             user <code>typesafe_api_key</code>); saving it needs <code>admin_all_objects</code>.
+             Give the people who run <code>| jev</code>, or view dashboards that use it, the <b>jev_user</b> role: it reads this key
+             and the answer cache without <code>list_storage_passwords</code>, which would open every stored secret to them.</p>
           <div class="jev-row">
             <input type="password" id="jev-key" placeholder="paste the key" autocomplete="off"/>
             <button id="jev-save" class="btn btn-primary">Save key</button>
             <span id="jev-key-status" class="jev-status"></span>
           </div>
           <p class="jev-hint">Stored key: <span id="jev-key-current">checking…</span></p>
+          <p class="jev-hint"><b>What leaves Splunk:</b> <code>| jev</code> sends the fields a search names and the question
+             text to <code>api.typesafe.ai</code> over HTTPS, billed to your TypeSafe account. No event data leaves Splunk until
+             someone runs <code>| jev</code>; the self-test sends one fixed sentence. Answers are cached in this app's KV store
+             without the event text.
+             See TypeSafe's <a href="https://typesafe.ai/legal/privacy-policy" target="_blank" rel="noopener">Privacy Policy</a>
+             and <a href="https://typesafe.ai/legal/data-processing" target="_blank" rel="noopener">Data Processing Agreement</a>.</p>
         </div>
       </html>
     </panel>
@@ -40,7 +47,37 @@
   </row>
   <row>
     <panel>
-      <title>3 · Try the three question types</title>
+      <title>3 · Settings</title>
+      <html>
+        <div class="jev-setup">
+          <p>Saved to <code>local/jev.conf</code> in this app, for every search (needs <code>admin_all_objects</code>).
+             Only the values you change are saved. A search can still override them, for example with <code>model=</code>.</p>
+          <table class="jev-form">
+            <tr><td><label for="jev-model">Model</label></td>
+                <td><input type="text" id="jev-model" data-stanza="api" data-key="model" placeholder="jev-latest"/></td>
+                <td class="jev-hint">Pin a version such as <code>jev-1.13.0</code> so a new release cannot move your answers.</td></tr>
+            <tr><td><label for="jev-maxevents">API requests per search</label></td>
+                <td><input type="number" min="0" id="jev-maxevents" data-stanza="defaults" data-key="maxevents"/></td>
+                <td class="jev-hint">The cost guard (<code>maxevents</code>); 0 turns it off.</td></tr>
+            <tr><td><label for="jev-ttl">Keep answers for (days)</label></td>
+                <td><input type="number" min="0" id="jev-ttl" data-stanza="cache" data-key="ttl_days"/></td>
+                <td class="jev-hint">Older answers are judged again and purged nightly; 0 keeps them forever.</td></tr>
+            <tr><td><label for="jev-proxy">HTTPS proxy</label></td>
+                <td><input type="text" id="jev-proxy" data-stanza="api" data-key="proxy_url" placeholder="http://proxy.example.com:3128"/></td>
+                <td class="jev-hint">Empty: the search head connects directly.</td></tr>
+            <tr><td><label for="jev-ca">CA bundle</label></td>
+                <td><input type="text" id="jev-ca" data-stanza="api" data-key="ca_bundle" placeholder="/opt/splunk/etc/auth/proxy-ca.pem"/></td>
+                <td class="jev-hint">A PEM file on the search head, when a proxy re-signs TLS. Empty: the system trust store.</td></tr>
+          </table>
+          <div class="jev-row">
+            <button id="jev-settings-save" class="btn">Save settings</button>
+            <span id="jev-settings-status" class="jev-status"></span>
+          </div>
+        </div>
+      </html>
+    </panel>
+    <panel>
+      <title>4 · Try the three question types</title>
       <html>
         <div class="jev-setup">
           <p>Every answer becomes a field. The three types return different shapes:</p>

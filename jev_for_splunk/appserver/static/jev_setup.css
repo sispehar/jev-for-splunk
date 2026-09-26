@@ -2,6 +2,7 @@
 .jev-setup .jev-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0; }
 .jev-setup input#jev-key { min-width: 340px; height: 30px; padding: 0 8px; }
 .jev-setup .jev-hint { opacity: 0.8; font-size: 12px; }
+.jev-setup li code { white-space: normal; overflow-wrap: anywhere; }
 .jev-status { font-size: 12px; }
 .jev-status.ok { color: #28b6a4; }
 .jev-status.warn { color: #e6b24a; }
@@ -11,3 +12,6 @@
 .jev-table td.ok { color: #28b6a4; font-weight: 600; }
 .jev-table td.warn { color: #e6b24a; font-weight: 600; }
 .jev-table td.fail { color: #f2643d; font-weight: 600; }
+.jev-form { border-collapse: collapse; margin: 8px 0; }
+.jev-form td { padding: 4px 8px 4px 0; vertical-align: middle; }
+.jev-form input { width: 260px; height: 28px; padding: 0 8px; }

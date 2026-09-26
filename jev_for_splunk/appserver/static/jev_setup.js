@@ -17,6 +17,9 @@ require(["jquery", "splunkjs/mvc", "splunkjs/mvc/simplexml/ready!"], function ($
             }
             var item = coll.item(ENTITY);
             $("#jev-key-current").text(item ? "stored (realm " + REALM + ", user " + USER + ")" : "not stored yet");
+            // a key stored some other way (REST, CLI, a restored backup) configures the app too;
+            // otherwise Splunk keeps sending everyone who opens the app back to this page
+            if (item) { markConfigured(); }
         });
     }
 
@@ -69,5 +72,68 @@ require(["jquery", "splunkjs/mvc", "splunkjs/mvc/simplexml/ready!"], function ($
         });
     });
 
+    // Settings: read the effective jev.conf values; write only the ones changed, so an app upgrade's new
+    // defaults are not hidden behind copies in local/jev.conf.
+    var VALID = {
+        model: /^[A-Za-z0-9._-]+$/,
+        maxevents: /^\d+$/,
+        ttl_days: /^\d+$/,
+        proxy_url: /^(https?:\/\/\S+)?$/
+    };
+
+    function settingInputs() {
+        return $("#jev-settings-save").closest(".jev-setup").find("input[data-stanza]");
+    }
+
+    function loadSettings() {
+        var stanzas = {};
+        settingInputs().each(function () { stanzas[$(this).data("stanza")] = true; });
+        $.each(stanzas, function (stanza) {
+            service.get("configs/conf-jev/" + stanza, { output_mode: "json" }, function (err, response) {
+                if (err) { status("#jev-settings-status", "cannot read jev.conf: " + errorText(err), "warn"); return; }
+                var entry = response && response.data && response.data.entry && response.data.entry[0];
+                var content = (entry && entry.content) || {};
+                settingInputs().filter("[data-stanza='" + stanza + "']").each(function () {
+                    var value = content[$(this).data("key")];
+                    value = (value === undefined || value === null) ? "" : String(value);
+                    $(this).val(value).data("loaded", value);
+                });
+            });
+        });
+    }
+
+    $("#jev-settings-save").on("click", function () {
+        var changes = {}, count = 0, bad = [];
+        settingInputs().each(function () {
+            var key = $(this).data("key"), stanza = $(this).data("stanza"), value = ($(this).val() || "").trim();
+            if (value === $(this).data("loaded")) { return; }
+            if (VALID[key] && !VALID[key].test(value)) { bad.push(key); return; }
+            changes[stanza] = changes[stanza] || {};
+            changes[stanza][key] = value;
+            count += 1;
+        });
+        if (bad.length) { status("#jev-settings-status", "check " + bad.join(", "), "warn"); return; }
+        if (!count) { status("#jev-settings-status", "nothing changed", ""); return; }
+        status("#jev-settings-status", "saving…", "");
+        var stanzas = Object.keys(changes), pending = stanzas.length, failure = null;
+        $.each(stanzas, function (_, stanza) {
+            service.post("configs/conf-jev/" + stanza, changes[stanza], function (err) {
+                if (err) {
+                    failure = failure || errorText(err);
+                } else {
+                    $.each(changes[stanza], function (key, value) {
+                        settingInputs().filter("[data-key='" + key + "']").data("loaded", value);
+                    });
+                }
+                pending -= 1;
+                if (pending === 0) {
+                    status("#jev-settings-status", failure ? "save failed: " + failure : "saved; the next search uses it",
+                           failure ? "fail" : "ok");
+                }
+            });
+        });
+    });
+
     refreshCurrent();
+    loadSettings();
 });

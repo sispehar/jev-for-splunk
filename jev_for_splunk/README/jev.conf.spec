@@ -74,7 +74,8 @@ collection = <string>
 * Default: jev_cache
 
 ttl_days = <integer>
-* Answers older than this are treated as missing and judged again. 0 keeps
+* Answers older than this are treated as missing and judged again, and the
+  nightly saved search jev_purge_expired (| jevpurge) deletes them. 0 keeps
   them forever.
 * Default: 90
 

@@ -162,6 +162,11 @@ class Evaluator(object):
     def _remember(self, nkey, outcome):
         self.memo[nkey] = outcome
         self.memo.move_to_end(nkey)
+
+    def _trim_memo(self):
+        """Evict the least recently used answers. Runs after a chunk is filled, never between
+        planning and filling, so an answer the chunk relies on (paid for or read from the KV
+        store) is never dropped before its records get it."""
         while len(self.memo) > self.memo_limit:
             old, _ = self.memo.popitem(last=False)
             self._fresh.discard(old)
@@ -195,7 +200,10 @@ class Evaluator(object):
                 key = cache_key(self.model, state, wire)
                 nkey = "%s#%d.%d" % (key, self._seq, index) if off else key
                 keys[qid] = (key, nkey)
-                if nkey in need or (not off and nkey in self.memo):
+                if nkey in need:
+                    continue
+                if not off and nkey in self.memo:
+                    self.memo.move_to_end(nkey)   # recently used: keep it past this chunk's trim
                     continue
                 need[nkey] = (qid, wire, state, key, group)
             plans.append(_Plan(state=state, truncated=truncated, wires=wires, keys=keys,
@@ -336,6 +344,7 @@ class Evaluator(object):
                     self.memo.pop(nkey, None)
                     self._fresh.discard(nkey)
                     self._consumed.discard(nkey)
+        self._trim_memo()
         return records
 
     # -- output ---------------------------------------------------------------------

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import time
 from collections import OrderedDict
 
@@ -173,8 +175,46 @@ def test_memo_is_bounded(make_client, fake_http):
     fake_http.script.extend([_answers] * 5)
     evaluator = Evaluator(make_client(), _primitive("oc", OVERCHARGED), cache_mode="memo", primitive_alias="oc",
                           memo_limit=2, threads=1)
-    evaluator.process([{"message": str(i)} for i in range(5)])
+    out = evaluator.process([{"message": str(i)} for i in range(5)])
     assert len(evaluator.memo) == 2
+    # a chunk with more answers than the limit still hands every record its answer
+    assert [r["oc_error"] for r in out] == [""] * 5 and all(r["oc"] == "0.9000" for r in out)
+
+
+def test_memo_hit_survives_eviction_by_its_own_chunk(make_client, fake_http):
+    # A full memo, then a chunk that repeats its oldest entry and adds new ones: the repeat was
+    # planned as a hit, so the new answers must not evict it before the record is filled.
+    fake_http.script.extend([_answers] * 6)
+    evaluator = Evaluator(make_client(), _primitive("oc", OVERCHARGED), cache_mode="memo", primitive_alias="oc",
+                          memo_limit=3, threads=1)
+    evaluator.process([{"message": m} for m in ("a", "b", "c")])
+    out = evaluator.process([{"message": m} for m in ("a", "d", "e", "f")])
+    assert [r["oc_error"] for r in out] == [""] * 4 and out[0]["oc_cached"] == "1"
+    assert len(fake_http.requests) == 6 and len(evaluator.memo) == 3
+
+
+def test_kv_hits_beyond_the_memo_limit_are_all_filled(make_client, fake_http):
+    backend = MemoryCache()
+    fake_http.script.extend([_answers] * 6)
+    rows = [{"message": str(i)} for i in range(6)]
+    Evaluator(make_client(), _primitive("oc", OVERCHARGED), cache_mode="kv", backend=backend,
+              primitive_alias="oc", threads=1).process([dict(r) for r in rows])
+    evaluator = Evaluator(make_client(), _primitive("oc", OVERCHARGED), cache_mode="kv", backend=backend,
+                          primitive_alias="oc", memo_limit=2, threads=1)
+    out = evaluator.process([dict(r) for r in rows])
+    assert [r["oc_error"] for r in out] == [""] * 6 and [r["oc_cached"] for r in out] == ["1"] * 6
+    assert evaluator.stats.kv_hits == 6 and len(fake_http.requests) == 6
+
+
+@pytest.mark.parametrize("make", [MemoryCache, lambda: SqliteCache(os.path.join(tempfile.mkdtemp(), "c.sqlite"))])
+def test_purge_deletes_only_answers_older_than_the_cutoff(make):
+    cache = make()
+    wire = primitive_question("noul", ["message"], OVERCHARGED)
+    now = time.time()
+    cache.put_many([make_doc(key, "m", wire, {"type": "noul", "noul": 0.5}, "m", 1, 1, 1, 1, created=now - age * 86400)
+                    for key, age in (("old", 40), ("older", 400), ("new", 1))])
+    assert cache.purge(now - 30 * 86400) == 2
+    assert list(cache.get_many(["old", "older", "new"])) == ["new"]
 
 
 def test_sqlite_cache_roundtrip(tmp_path):

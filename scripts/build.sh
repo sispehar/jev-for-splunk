@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Build the Jev for Splunk app.
 #
-# Usage: ./scripts/build.sh [--release [patch|minor]] [--appinspect] [--vendor-sdk] [--skip-tests]
+# Usage: ./scripts/build.sh [--release [patch|minor]] [--keep-build] [--appinspect] [--vendor-sdk] [--skip-tests]
 #
 #   (no flags)     dev build: version unchanged, [install] build bumped
 #   --release      bump the version (app.conf, app.manifest and jev_core)
+#   --keep-build   package the version and build as committed (CI and GitHub releases)
 #   --appinspect   run splunk-appinspect (cloud tags) on the tarball; fail on any failure
 #   --vendor-sdk   (re)download splunk-sdk and refresh bin/lib/splunklib
 #   --skip-tests   skip pytest (still validates batteries and Python 3.9 syntax)
@@ -16,12 +17,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
 APP="jev_for_splunk"
 SDK_VERSION="2.1.1"
+# sha256 of splunk-sdk-2.1.1.tar.gz on PyPI; a download that does not match is never vendored
+SDK_SHA256="46300d52f09e0aed7e5962ce2ba08ef54421ffb3a538c6af6164dcbf9f075faa"
 
-RELEASE=""; RUN_APPINSPECT=0; VENDOR=0; TESTS=1
+RELEASE=""; RUN_APPINSPECT=0; VENDOR=0; TESTS=1; KEEP_BUILD=0
 while [ $# -gt 0 ]; do
     case "$1" in
-        -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         --release) RELEASE="patch"; if [ $# -gt 1 ] && { [ "$2" == "patch" ] || [ "$2" == "minor" ]; }; then RELEASE="$2"; shift; fi ;;
+        --keep-build) KEEP_BUILD=1 ;;
         --appinspect) RUN_APPINSPECT=1 ;;
         --vendor-sdk) VENDOR=1 ;;
         --skip-tests) TESTS=0 ;;
@@ -40,6 +44,8 @@ if [ "$VENDOR" -eq 1 ] || [ ! -f "$REPO/$APP/bin/lib/splunklib/__init__.py" ]; t
     TMP="$(mktemp -d)"
     URL="$(curl -s "https://pypi.org/pypi/splunk-sdk/$SDK_VERSION/json" | "$PY" -c 'import sys,json; d=json.load(sys.stdin); print([u["url"] for u in d["urls"] if u["packagetype"]=="sdist"][0])')"
     curl -sL -o "$TMP/sdk.tar.gz" "$URL"
+    GOT="$("$PY" -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$TMP/sdk.tar.gz")"
+    [ "$GOT" == "$SDK_SHA256" ] || { echo "ERROR: splunk-sdk $SDK_VERSION checksum mismatch (got $GOT)"; rm -rf "$TMP"; exit 1; }
     tar xzf "$TMP/sdk.tar.gz" -C "$TMP"
     rm -rf "$REPO/$APP/bin/lib/splunklib"
     mkdir -p "$REPO/$APP/bin/lib"
@@ -58,15 +64,15 @@ echo "  + batteries valid"
 # 4. Tests on both Python versions Splunk ships
 if [ "$TESTS" -eq 1 ] && command -v uv >/dev/null 2>&1; then
     for v in 3.9 3.13; do
-        ( cd "$REPO" && uv run --python "$v" --no-project --with pytest pytest -q -p no:cacheprovider >/dev/null ) || { echo "ERROR: tests failed on Python $v"; exit 1; }
+        OUT="$(cd "$REPO" && uv run --python "$v" --no-project --with pytest pytest -q -p no:cacheprovider 2>&1)" \
+            || { echo "$OUT" | tail -40; echo "ERROR: tests failed on Python $v"; exit 1; }
         echo "  + tests pass on Python $v"
     done
 fi
 
 # 5. Python 3.9 syntax of everything we ship (Splunk 10.0/10.1 bundle 3.9)
 if command -v uv >/dev/null 2>&1; then
-    uv run --python 3.9 --no-project python -m compileall -q \
-        "$REPO/$APP/bin/jev.py" "$REPO/$APP/bin/jevtest.py" "$REPO/$APP/bin/jev_splunk.py" "$REPO/$APP/bin/jev_core" >/dev/null \
+    uv run --python 3.9 --no-project python -m compileall -q "$REPO/$APP/bin/"*.py "$REPO/$APP/bin/jev_core" >/dev/null \
         || { echo "ERROR: not Python 3.9 compatible"; exit 1; }
     echo "  + python 3.9 syntax ok"
 fi
@@ -81,7 +87,9 @@ if [ -n "$RELEASE" ]; then
 fi
 sedi "s/^version = .*/version = ${NEW}/" "$CONF"
 CURB="$(grep '^build = ' "$CONF" | head -1 | cut -d= -f2 | tr -d ' ')"
-sedi "s/^build = .*/build = $((CURB + 1))/" "$CONF"
+NEWB=$((CURB + 1))
+if [ "$KEEP_BUILD" -eq 1 ]; then NEWB="$CURB"; fi
+sedi "s/^build = .*/build = ${NEWB}/" "$CONF"
 "$PY" - "$REPO/$APP/app.manifest" "$NEW" <<'PY'
 import json, sys
 path, version = sys.argv[1], sys.argv[2]
@@ -89,6 +97,7 @@ doc = json.load(open(path)); doc["info"]["id"]["version"] = version
 open(path, "w").write(json.dumps(doc, indent=2) + "\n")
 PY
 sedi "s/^__version__ = .*/__version__ = \"${NEW}\"/" "$REPO/$APP/bin/jev_core/__init__.py"
+sedi "s/^version = .*/version = \"${NEW}\"/" "$REPO/pyproject.toml"
 "$PY" - "$REPO/$APP" <<'PY' || exit 1
 import json, pathlib, re, sys
 app = pathlib.Path(sys.argv[1])
@@ -98,7 +107,7 @@ versions.add(re.search(r'__version__ = "([^"]+)"', (app / "bin/jev_core/__init__
 if len(versions) != 1:
     print("ERROR: version mismatch: %s" % sorted(versions)); raise SystemExit(1)
 PY
-echo "  version: $CUR -> $NEW$([ -n "$RELEASE" ] && echo " (release)" || echo " (unchanged; use --release to bump)"), build $((CURB + 1))"
+echo "  version: $CUR -> $NEW$([ -n "$RELEASE" ] && echo " (release)" || echo " (unchanged; use --release to bump)"), build $NEWB"
 
 # 7. License and docs in the app; no bytecode, no local state
 cp "$REPO/LICENSE" "$REPO/$APP/LICENSE"
@@ -120,7 +129,8 @@ tar ${TAR_FLAGS[@]+"${TAR_FLAGS[@]}"} \
     --exclude='.git' --exclude='.git*' --exclude='.DS_Store' --exclude='._*' --exclude='__MACOSX' \
     --exclude="$APP/local" --exclude='local.meta' --exclude='__pycache__' --exclude='*.pyc' \
     -czf "$REPO/dist/$APP.tar.gz" -C "$REPO" "$APP"
-echo "  + dist/$APP.tar.gz ($(du -h "$REPO/dist/$APP.tar.gz" | cut -f1))"
+SHA="$("$PY" -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$REPO/dist/$APP.tar.gz")"
+echo "  + dist/$APP.tar.gz ($(wc -c < "$REPO/dist/$APP.tar.gz" | tr -d ' ') bytes, sha256 $SHA)"
 
 # 9. AppInspect
 if [ "$RUN_APPINSPECT" -eq 1 ]; then
@@ -133,8 +143,10 @@ if [ "$RUN_APPINSPECT" -eq 1 ]; then
             --data-format json --output-file "$REPORT" >/dev/null 2>&1 || true
         FAILS="$("$PY" -c "import json;print(json.load(open('$REPORT'))['summary'].get('failure','?'))" 2>/dev/null || echo '?')"
         WARN="$("$PY" -c "import json;print(json.load(open('$REPORT'))['summary'].get('warning','?'))" 2>/dev/null || echo '?')"
-        echo "  AppInspect $APP: failure=$FAILS warning=$WARN (dist/appinspect-$APP.json)"
+        FUTURE="$("$PY" -c "import json;print(json.load(open('$REPORT'))['summary'].get('future_failure',0))" 2>/dev/null || echo '?')"
+        echo "  AppInspect $APP: failure=$FAILS warning=$WARN future_failure=$FUTURE (dist/appinspect-$APP.json)"
         [ "$FAILS" == "0" ] || { echo "ERROR: AppInspect reported failures for $APP"; exit 1; }
+        [ "$FUTURE" == "0" ] || echo "  ! AppInspect will fail $APP in a future release; see future_failure in the report"
     fi
 fi
 echo "Done. Install dist/$APP.tar.gz with Apps > Manage Apps > Install app from file."

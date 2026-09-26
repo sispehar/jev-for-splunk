@@ -24,6 +24,13 @@ def test_parse_state_mapping_rejects(text):
         parse_state_mapping(text)
 
 
+def test_dotted_field_error_says_how_to_name_it():
+    with pytest.raises(BatteryError) as info:
+        parse_state_mapping("data.message")
+    assert "msg=data.message" in str(info.value)
+    assert parse_state_mapping("msg=data.message")["msg"] == ("data.message", "str")
+
+
 def test_load_battery_from_default_dir(app_root):
     battery = load_battery(app_root, "test_battery")
     assert battery.id == "test_battery" and battery.version == 2

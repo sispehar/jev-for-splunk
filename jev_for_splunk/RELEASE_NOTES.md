@@ -1,5 +1,41 @@
 # Release notes: Jev for Splunk
 
+## 0.1.1
+
+Restart Splunk after upgrading: splunkd loads the new key endpoint and the `jev_user` role at startup.
+
+- **Fix: a long search could lose answers it already had.** The in-search memo holds at most 100,000
+  answers. Once it was full, new answers could evict ones the same chunk still needed, including answers
+  just paid for or read from the KV store, and those events reported `maxevents_exceeded`. The memo is
+  now trimmed only after a chunk is filled, and a reused answer counts as recently used.
+- **`| jev` no longer needs `list_storage_passwords`.** Give users the new `jev_user` role, which holds the
+  `use_jev` capability and can read and write the judgment cache. The command gets the key from the app's
+  own endpoint, which splunkd opens only to `use_jev` and which serves that key and no other secret.
+  Dashboards that use `| jev` can now be shared with people who are not admins. Admins keep reading the
+  key directly.
+- **`| jevpurge`** deletes answers older than `ttl_days`, and the saved search `jev_purge_expired` runs it
+  every night. The cache no longer grows without bound. Neither sends anything to TypeSafe.
+- **An audit trail.** Every search's summary line in `jev.log` names the fields it sent (`state_fields`),
+  and the Health view has a panel of what left Splunk, by user and app.
+- **Settings on the Setup page:** the model, `maxevents`, `ttl_days`, the proxy and the CA bundle, saved
+  to `local/jev.conf`.
+- **`dryrun=true` works before a key is saved**, so the cost can be estimated before signing up.
+- **Fix: a key stored outside the Setup page left the app unconfigured.** A key saved over REST or the
+  CLI never set `is_configured`, so Splunk kept sending everyone who opened the app to the Setup page. The
+  page now marks the app configured whenever it finds a stored key.
+- **Fix: every self-test made splunkd log "Connection closed by peer"**, because the KV store probe's
+  DELETE reply was never read. The Health view runs the self-test on every load.
+- **Fix: a response cut short mid-body is retried** like other network errors. It used to fail the
+  request with `internal`.
+- **A malformed `jev.conf` value is reported by file and setting.** `| jev` shows the message, and
+  `| jevtest` reports it as a failed `config` check and runs the other checks. A failed `live=true` probe
+  is now reported as `api_live`, not `api_models`.
+- **A dotted field name gets a hint:** `| jev noul data.message "..."` now says to write
+  `msg=data.message`.
+- **Lookup and battery references reject `.` and `..`** as app or file names.
+- **Packaging:** app icons, a note on the Setup page about what leaves Splunk, the splunk-sdk download
+  checked against its SHA-256, and GitHub Actions that test every change and publish tagged releases.
+
 ## 0.1.0, build 6
 
 - **Fix: `| jev` followed by `stats`, `timechart` or `chart` judged nothing.** The command now declares
