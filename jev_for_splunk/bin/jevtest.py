@@ -24,10 +24,10 @@ from jev_core import __version__  # noqa: E402
 from jev_core.battery import BatteryError, load_battery  # noqa: E402
 from jev_core.cache import make_doc  # noqa: E402
 from jev_core.client import JevClient, JevError  # noqa: E402
-from jev_core.config import load_config  # noqa: E402
+from jev_core.config import ConfigError, load_config  # noqa: E402
 from jev_core.options import FileLookupResolver  # noqa: E402
 from jev_core.secrets import fingerprint  # noqa: E402
-from jev_splunk import KVStoreCache, key_from_splunk, service_for  # noqa: E402
+from jev_splunk import KVStoreCache, read_key, service_for  # noqa: E402
 
 OWN_APP = os.path.basename(APP_ROOT)
 
@@ -49,10 +49,15 @@ class JevTestCommand(GeneratingCommand):
         yield row("python", "ok", "%s (%s)" % (platform.python_version(), sys.executable))
         yield row("splunklib", "ok", getattr(splunklib, "__version__", "unknown"))
 
-        cfg = load_config(APP_ROOT)
-        yield row("config", "ok", "endpoint=%s model=%s threads=%s maxevents=%s rps=%s cache=%s ttl_days=%s sources=%s" % (
-            cfg.endpoint, cfg.model, cfg.threads, cfg.maxevents, cfg.requests_per_second, cfg.cache_mode,
-            cfg.cache_ttl_days, ",".join(os.path.relpath(p, APP_ROOT) for p in cfg.sources) or "built-in defaults"))
+        try:
+            cfg = load_config(APP_ROOT)
+            yield row("config", "ok", "endpoint=%s model=%s threads=%s maxevents=%s rps=%s cache=%s ttl_days=%s sources=%s" % (
+                cfg.endpoint, cfg.model, cfg.threads, cfg.maxevents, cfg.requests_per_second, cfg.cache_mode,
+                cfg.cache_ttl_days, ",".join(os.path.relpath(p, APP_ROOT) for p in cfg.sources) or "built-in defaults"))
+        except ConfigError as exc:
+            # | jev fails with the same message; the remaining checks run on the built-in defaults
+            yield row("config", "fail", "%s (| jev will not run until this is fixed)" % exc)
+            cfg = load_config(None)
 
         apps_dir = os.environ.get("JEV_APPS_DIR") or os.path.dirname(APP_ROOT)
         scanner = FileLookupResolver(apps_dir, search_app=getattr(info, "app", None), own_app=OWN_APP)
@@ -71,9 +76,9 @@ class JevTestCommand(GeneratingCommand):
         api_key = os.environ.get("JEV_API_KEY")
         if not api_key:
             try:
-                api_key = key_from_splunk(info, cfg.realm, cfg.username, app=OWN_APP)
-                yield row("api_key", "ok", "stored in storage/passwords (realm=%s user=%s fingerprint=%s)" % (
-                    cfg.realm, cfg.username, fingerprint(api_key)))
+                api_key, how = read_key(info, cfg.realm, cfg.username, app=OWN_APP)
+                yield row("api_key", "ok", "stored (realm=%s user=%s fingerprint=%s), read through %s" % (
+                    cfg.realm, cfg.username, fingerprint(api_key), how))
             except JevError as exc:
                 yield row("api_key", "fail", exc.message)
             except Exception as exc:  # no splunkd (tests)
@@ -83,6 +88,7 @@ class JevTestCommand(GeneratingCommand):
 
         if api_key:
             endpoint = os.environ.get("JEV_ENDPOINT") or cfg.endpoint
+            client = None
             try:
                 client = JevClient(api_key, endpoint=endpoint, model=cfg.model, timeout=cfg.timeout, max_retries=1,
                                    requests_per_second=0, proxy_url=cfg.proxy_url, ca_bundle=cfg.ca_bundle)
@@ -91,14 +97,21 @@ class JevTestCommand(GeneratingCommand):
                 names = [m.get("name") if isinstance(m, dict) else str(m) for m in models]
                 yield row("api_models", "ok", "%s reachable in %.0f ms; models: %s" % (
                     endpoint, (time.time() - started) * 1000, ", ".join(names) or "(none listed)"))
-                if self.live:
+            except JevError as exc:
+                client = None
+                yield row("api_models", "fail", "%s: %s" % (exc.code, exc.message))
+            except Exception as exc:  # e.g. an unreadable ca_bundle
+                client = None
+                yield row("api_models", "fail", "%s: %s" % (type(exc).__name__, exc))
+            if client is not None and self.live:
+                try:
                     result = client.judge({"text": "All 42 tests passed after the fix."},
                                           {"reports_success": {"type": "noul",
                                                                "instructions": "Does `text` report that something succeeded?"}})
                     yield row("api_live", "ok", "model=%s reports_success=%.2f input_tokens=%d latency_ms=%.0f" % (
                         result.model, result.answers["reports_success"].get("noul", -1), result.input_tokens, result.latency_ms))
-            except JevError as exc:
-                yield row("api_models", "fail", "%s: %s" % (exc.code, exc.message))
+                except JevError as exc:
+                    yield row("api_live", "fail", "%s: %s" % (exc.code, exc.message))
 
         # KV store: write, read back and delete one probe document
         try:
@@ -109,7 +122,8 @@ class JevTestCommand(GeneratingCommand):
                              "probe", 0, 0, 1, 0)
             cache.put_many([probe])
             found = cache.get_many([probe_key])
-            service.delete(cache.path + probe_key, owner="nobody", app=OWN_APP)
+            # read the reply, or splunkd logs "Connection closed by peer" for every self-test
+            service.delete(cache.path + probe_key, owner="nobody", app=OWN_APP).body.read()
             if probe_key in found:
                 yield row("kvstore", "ok", "collection %s readable and writable" % cfg.cache_collection)
             else:

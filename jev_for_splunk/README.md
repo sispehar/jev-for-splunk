@@ -55,30 +55,48 @@ judged.
 | `cache=refresh` | judge again and overwrite |
 | `cache=memo` | reuse only within the search |
 | `cache=off` | never reuse |
-| `dryrun=true` | estimate tokens and cost without calling the API; cached answers are still filled in |
+| `dryrun=true` | estimate tokens and cost without calling the API, even before a key is saved; cached answers are still filled in |
 
 If the KV store is unavailable, the command warns once and carries on without it. The cache never fails a
 search. `ttl_days` (90) in `jev.conf [cache]` expires old answers, and
-`| inputlookup jev_cache_lookup` shows what is stored.
+`| inputlookup jev_cache_lookup` shows what is stored (admin and sc_admin).
+
+Expired answers are judged again when asked, and the saved search `jev_purge_expired` deletes them every
+night with `| jevpurge`, which sends nothing to TypeSafe. `| jevpurge days=30` purges by hand, and
+`ttl_days = 0` keeps answers forever.
 
 ## Other options
 
 `model=` (pin a version, e.g. `jev-1.13.0`; an app can also pin one in its own `default/jev.conf`),
 `threads=` (1-32), `rps=` (requests per second, 1-20; TypeSafe allows 1,200 a minute), `maxevents=` (a cost
 guard: at most this many API requests per search), `maxstate=`, `timeout=`, `probs=`, `meta=full`,
-`keepstate=`. Defaults are in `default/jev.conf`, documented in `README/jev.conf.spec`.
+`keepstate=`. Defaults are in `default/jev.conf`, documented in `README/jev.conf.spec`. The Setup page
+edits the model, `maxevents`, `ttl_days`, the proxy and the CA bundle.
 
 ## Setup and permissions
 
-1. Open the **Setup** page, paste the TypeSafe API key, and run the self-test (`| jevtest live=true`).
-   The key is stored in `storage/passwords` (realm `jev_for_splunk`).
-2. Running `| jev` needs the `list_storage_passwords` capability, because the command reads the key with
-   the searching user's own session. The KV collection is readable and writable by admin and sc_admin.
+1. Install the app on the search head and restart Splunk (after every upgrade too: splunkd loads the
+   app's key endpoint at startup). Open the **Setup** page, paste the TypeSafe API key, and run the
+   self-test (`| jevtest live=true`). The key is stored in `storage/passwords` (realm `jev_for_splunk`).
+2. Give the people who run `| jev`, or view dashboards that use it, the **jev_user** role next to their
+   own. It holds the `use_jev` capability and can read and write the judgment cache. The command then gets
+   the key from this app's endpoint, which splunkd opens only to `use_jev`, so they don't need
+   `list_storage_passwords`, which would open every stored secret to them. `use_jev` does let its holders
+   read the TypeSafe key itself. Admins, who hold `list_storage_passwords`, read the key directly.
 3. `| jev` runs only on the search head: the key, the cache and the outbound HTTPS route live there.
-   It sends only the fields you name to `api.typesafe.ai`.
+   It sends only the fields a search names, and the question, to `api.typesafe.ai`, billed to your
+   TypeSafe account. No event data leaves Splunk until someone runs `| jev`; the self-test sends one
+   fixed sentence. See TypeSafe's [Privacy Policy](https://typesafe.ai/legal/privacy-policy) and
+   [Data Processing Agreement](https://typesafe.ai/legal/data-processing).
+4. Optional: to have Splunk Web ask before a search opened from a link runs `| jev`, set `is_risky = true`
+   under `[jev]` in `local/commands.conf`. Dashboards that use `| jev` then ask before they run too.
 
 **Coming from `jev_agent_evals`:** it defines `| jev` too, so disable one of the two apps. `| jevtest`
 reports which app answers the command (`command_owner`). The key realm changed to `jev_for_splunk`.
 
-The **Health** view shows the self-test, fresh answers against cached ones, cost by app and user, and
-warnings from `jev.log` (`` `jev_internal_log` ``).
+**Not the Splunkbase app.** *Jev for Splunk (unofficial)* on Splunkbase is a different app with the same
+folder name and its own `| jev`. Installing it replaces this app, and the reverse. This app sets
+`check_for_updates = false`, so Splunk never offers that app's releases as updates to this one.
+
+The **Health** view shows the self-test, fresh answers against cached ones, cost by app and user, which
+fields each search sent to TypeSafe and who ran it, and warnings from `jev.log` (`` `jev_internal_log` ``).

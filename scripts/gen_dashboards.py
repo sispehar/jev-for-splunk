@@ -32,6 +32,10 @@ def jev_health():
                     "| sort - tokens")
     d.table("table_cost", "Tokens and cost by app and user", "ds_cost")
     d.row_weighted([("chart_usage", 3), ("table_cost", 2)], 300)
+    d.ds("ds_sent", '`jev_internal_log` "summary" requests>0 | stats sum(requests) AS requests sum(fresh) AS "answers judged" '
+                    "latest(_time) AS last BY user app label state_fields | convert ctime(last) | sort - requests")
+    d.table("table_sent", "What left Splunk: the fields each search sent to TypeSafe, by user and app", "ds_sent")
+    d.row(["table_sent"], 240)
     d.ds("ds_errors", '`jev_internal_log` (level=ERROR OR level=WARNING) | stats count latest(_raw) AS example BY logger '
                       "| sort - count")
     d.table("table_errors", "Warnings and errors in jev.log", "ds_errors")

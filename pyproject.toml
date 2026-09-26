@@ -1,6 +1,6 @@
 [project]
 name = "jev-for-splunk"
-version = "0.1.0"
+version = "0.1.1"
 description = "Jev for Splunk: ask TypeSafe Jev typed questions about any events from SPL (| jev noul|choice|score), with a KV store judgment cache."
 requires-python = ">=3.9"
 dependencies = []

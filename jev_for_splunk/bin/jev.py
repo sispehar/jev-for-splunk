@@ -34,11 +34,11 @@ from jev_core import __version__  # noqa: E402
 from jev_core.battery import Battery, BatteryError, load_battery, parse_state_mapping  # noqa: E402
 from jev_core.cache import SqliteCache  # noqa: E402
 from jev_core.client import JevClient, JevError  # noqa: E402
-from jev_core.config import load_config  # noqa: E402
+from jev_core.config import ConfigError, load_config  # noqa: E402
 from jev_core.options import FileLookupResolver, ResolveError  # noqa: E402
 from jev_core.primitive import PrimitiveError, parse_positionals, primitive_question  # noqa: E402
 from jev_core.runner import Evaluator  # noqa: E402
-from jev_splunk import KVStoreCache, key_from_splunk, service_for  # noqa: E402
+from jev_splunk import KVStoreCache, read_key, service_for  # noqa: E402
 
 OWN_APP = os.path.basename(APP_ROOT)
 OPTION_TOKEN = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.S)
@@ -46,6 +46,7 @@ BATTERY_ONLY = ("battery", "questions", "state", "prefix")
 PRIMITIVE_ONLY = (("choice_options", "options"), ("levels", "levels"),
                   ("criteria_true", "criteria_true"), ("criteria_false", "criteria_false"))
 PRICE_PER_TOKEN = 0.042 / 1000000.0
+DRYRUN_KEY = "dryrun-sends-nothing"  # a dry run never calls the API, so it works before a key is saved
 
 
 # required_fields=["*"]: the fields a question reads are named in its arguments, which Splunk's
@@ -114,7 +115,7 @@ class JevCommand(StreamingCommand):
                 self._error_field = "jev_error"
         try:
             self._setup()
-        except (BatteryError, JevError, PrimitiveError, ResolveError) as exc:
+        except (BatteryError, ConfigError, JevError, PrimitiveError, ResolveError) as exc:
             self._fatal = str(getattr(exc, "message", None) or exc)
             self.logger.error("prepare failed: %s", self._fatal)
         except Exception as exc:  # keep the search alive with a readable message
@@ -182,15 +183,23 @@ class JevCommand(StreamingCommand):
                                    backend=backend, ttl_days=cfg.cache_ttl_days, batch_size=cfg.cache_batch_size,
                                    dryrun=bool(self.dryrun), primitive_alias=alias, meta=self.meta or "basic")
         self.logger.info("ready version=%s form=%s battery=%s questions=%d model=%s cache=%s threads=%d maxevents=%d "
-                         "sid=%s app=%s user=%s", __version__, "primitive" if alias else "battery", battery.id,
-                         len(battery.questions), cfg.model, mode, cfg.threads, cfg.maxevents,
-                         getattr(info, "sid", ""), search_app, getattr(info, "username", ""))
+                         "sid=%s app=%s user=%s state_fields=\"%s\"", __version__, "primitive" if alias else "battery",
+                         battery.id, len(battery.questions), cfg.model, mode, cfg.threads, cfg.maxevents,
+                         getattr(info, "sid", ""), search_app, getattr(info, "username", ""), _state_fields(battery))
 
     def _api_key(self, cfg):
         dev_key = os.environ.get("JEV_API_KEY")  # development override for tests; never set inside Splunk
         if dev_key:
             return dev_key
-        return key_from_splunk(self._metadata.searchinfo, cfg.realm, cfg.username, app=OWN_APP)
+        try:
+            key, how = read_key(self._metadata.searchinfo, cfg.realm, cfg.username, app=OWN_APP)
+        except Exception as exc:
+            if not self.dryrun:
+                raise
+            self.logger.info("dry run without a readable key: %s", getattr(exc, "message", None) or exc)
+            return DRYRUN_KEY
+        self.logger.debug("key read through %s", how)
+        return key
 
     # -- streaming -----------------------------------------------------------------
     def stream(self, records):
@@ -226,13 +235,14 @@ class JevCommand(StreamingCommand):
         label = evaluator.alias or ("battery " + evaluator.battery.id)
         reused = stats.kv_hits + stats.memo_hits
         usd = stats.input_tokens * PRICE_PER_TOKEN
-        self.logger.info("summary sid=%s app=%s user=%s form=%s label=%s cache=%s kv=%s records=%d answers=%d "
-                         "kv_hits=%d memo_hits=%d fresh=%d requests=%d input_tokens=%d est_usd=%.6f est_tokens=%d "
-                         "errors=\"%s\" elapsed_s=%.1f",
+        # state_fields names what left Splunk when requests > 0: the audit trail the Health view reads
+        self.logger.info("summary sid=%s app=%s user=%s form=%s label=\"%s\" state_fields=\"%s\" cache=%s kv=%s records=%d "
+                         "answers=%d kv_hits=%d memo_hits=%d fresh=%d requests=%d input_tokens=%d est_usd=%.6f "
+                         "est_tokens=%d errors=\"%s\" elapsed_s=%.1f",
                          getattr(info, "sid", ""), getattr(info, "app", ""), getattr(info, "username", ""),
-                         "primitive" if evaluator.alias else "battery", label, evaluator.cache_mode, evaluator.kv_state,
-                         stats.records, stats.fresh + reused, stats.kv_hits, stats.memo_hits, stats.fresh,
-                         stats.requests, stats.input_tokens, usd, int(stats.est_tokens),
+                         "primitive" if evaluator.alias else "battery", label, _state_fields(evaluator.battery),
+                         evaluator.cache_mode, evaluator.kv_state, stats.records, stats.fresh + reused, stats.kv_hits,
+                         stats.memo_hits, stats.fresh, stats.requests, stats.input_tokens, usd, int(stats.est_tokens),
                          ",".join("%s:%d" % item for item in stats.errors.items()), time.time() - self._started)
         if evaluator.dryrun:
             self.write_info("jev %s: dry run, about %d input tokens ($%.5f) would be sent; %d answers already cached"
@@ -249,6 +259,11 @@ class JevCommand(StreamingCommand):
             self.write_error(message)
         else:
             self.write_warning(message)
+
+
+def _state_fields(battery):
+    """The event fields a battery reads, comma separated: what a request sends."""
+    return ",".join(field for field, _ in battery.state.values())
 
 
 dispatch(JevCommand, sys.argv, sys.stdin, sys.stdout, __name__)

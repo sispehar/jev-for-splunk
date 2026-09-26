@@ -71,7 +71,9 @@ def parse_state_mapping(text):
         else:
             field, kind = spec, "str"
         if not KEY_RE.match(key):
-            raise BatteryError("state key %r must match %s" % (key, KEY_RE.pattern))
+            # a bare field such as data.message doubles as its own key; say how to name it
+            hint = "" if "=" in part else "; name it, for example msg=%s" % part
+            raise BatteryError("state key %r must match %s%s" % (key, KEY_RE.pattern, hint))
         if kind not in STATE_TYPES:
             raise BatteryError("state type %r for %r must be one of %s" % (kind, key, ", ".join(STATE_TYPES)))
         if not field:

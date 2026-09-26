@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http.client
 import urllib.error
 
 import pytest
@@ -53,6 +54,16 @@ def test_network_errors_retry_then_give_up(make_client, fake_http):
     with pytest.raises(JevError) as info:
         make_client(max_retries=3).judge("s", {"q": {"type": "noul", "instructions": "x"}})
     assert info.value.code == "network:refused" and info.value.retryable
+
+
+def test_truncated_body_is_retried(make_client, fake_http):
+    class Truncated(object):
+        def read(self):
+            raise http.client.IncompleteRead(b'{"model": "jev', 40)
+
+    fake_http.script.extend([Truncated(), ok_response({"q": noul_answer(0.5)})])
+    result = make_client().judge("s", {"q": {"type": "noul", "instructions": "x"}})
+    assert result.attempts == 2 and result.answers["q"]["noul"] == 0.5
 
 
 def test_5xx_retries_and_reports(make_client, fake_http):

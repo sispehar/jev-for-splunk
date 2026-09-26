@@ -53,6 +53,10 @@ def parse_bool(value, default=False):
     return default
 
 
+class ConfigError(ValueError):
+    """A jev.conf value that cannot be read as the type its setting needs."""
+
+
 def _coerce(default, raw):
     if isinstance(default, bool):
         return parse_bool(raw, default)
@@ -61,6 +65,15 @@ def _coerce(default, raw):
     if isinstance(default, float):
         return float(raw)
     return str(raw).strip()
+
+
+def _setting(section, key, raw, where):
+    default = DEFAULTS[section][key]
+    try:
+        return _coerce(default, raw)
+    except (TypeError, ValueError, OverflowError):
+        kind = "number" if isinstance(default, (int, float)) else type(default).__name__
+        raise ConfigError("%s: [%s] %s = %r is not a %s" % (where, section, key, raw, kind))
 
 
 class Config(object):
@@ -123,13 +136,13 @@ def load_config(app_root=None, overrides=None, extra_roots=()):
                     continue
                 for key, raw in parser.items(section):
                     if key in data[section]:
-                        data[section][key] = _coerce(DEFAULTS[section][key], raw)
+                        data[section][key] = _setting(section, key, raw, path)
             sources.append(path)
     for section, values in (overrides or {}).items():
         for key, raw in values.items():
             if raw is None or section not in data or key not in data[section]:
                 continue
-            data[section][key] = _coerce(DEFAULTS[section][key], raw)
+            data[section][key] = _setting(section, key, raw, "search option")
     if data["cache"]["mode"] not in CACHE_MODES:
         data["cache"]["mode"] = "kv"
     return Config(data, sources)

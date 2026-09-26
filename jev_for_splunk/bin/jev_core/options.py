@@ -35,7 +35,8 @@ def split_ref(ref):
     else:
         app, name = None, text
     for part in (app, name):
-        if part is not None and not NAME_RE.match(part):
+        # all-dot names ('.', '..') would step out of the apps directory
+        if part is not None and (not NAME_RE.match(part) or not part.strip(".")):
             raise ResolveError("invalid name %r (letters, digits, '.', '_' and '-' only)" % part)
     if not name:
         raise ResolveError("empty reference")

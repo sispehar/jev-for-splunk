@@ -1,4 +1,4 @@
-"""The parts that need splunkd: the TypeSafe key in storage/passwords and the KV store cache.
+"""The parts that need splunkd: the TypeSafe key (storage/passwords or the use_jev endpoint) and the KV store cache.
 
 Kept out of jev_core so the core stays importable (and testable) without splunklib.
 """
@@ -14,6 +14,10 @@ from jev_core.client import JevError
 OWN_APP = "jev_for_splunk"
 READ_BATCH = 500
 WRITE_BATCH = 1000
+# restmap.conf [script:jev_key]: splunkd serves it only to holders of use_jev (bin/jev_key.py)
+KEY_ENDPOINT = "jev_for_splunk/key"
+NO_ACCESS = ("your role needs the use_jev capability (the jev_user role has it) or list_storage_passwords "
+             "to run | jev")
 
 
 def service_for(searchinfo, app=OWN_APP):
@@ -40,11 +44,52 @@ def key_from_splunk(searchinfo, realm, username, app=OWN_APP, service=None):
                 return secret
     except HTTPError as exc:
         if exc.status in (401, 403):
-            raise JevError("auth_failed", "your role needs the list_storage_passwords capability to run | jev")
+            raise JevError("auth_failed", NO_ACCESS)
         if exc.status != 404:
-            raise JevError("api_key_missing", "could not read storage/passwords: %s" % exc)
+            raise JevError("storage_error", "could not read storage/passwords: %s" % exc)
     raise JevError("api_key_missing",
                    "no TypeSafe API key stored yet; open the Jev for Splunk Setup page (realm=%s user=%s)" % (realm, username))
+
+
+def key_from_endpoint(searchinfo, app=OWN_APP, service=None):
+    """Read the key through this app's endpoint, which needs use_jev instead of list_storage_passwords."""
+    from splunklib.binding import HTTPError
+
+    service = service or service_for(searchinfo, app)
+    try:
+        response = service.get(KEY_ENDPOINT, owner="nobody", app=app, output_mode="json")
+        data = json.loads(response.body.read().decode("utf-8") or "{}")
+    except HTTPError as exc:
+        if exc.status in (401, 403):
+            raise JevError("auth_failed", NO_ACCESS)
+        raise JevError("endpoint_unavailable", "the key endpoint answered HTTP %d" % exc.status)
+    except ValueError:
+        raise JevError("endpoint_unavailable", "the key endpoint did not answer with JSON")
+    if not isinstance(data, dict) or not data.get("key"):
+        raise JevError("api_key_missing", "no TypeSafe API key stored yet; open the Jev for Splunk Setup page")
+    return data["key"]
+
+
+def read_key(searchinfo, realm, username, app=OWN_APP, service=None):
+    """(key, how): storage/passwords with the user's own session, else this app's use_jev endpoint.
+
+    Admins read the key directly. Users with the jev_user role lack list_storage_passwords, which
+    would open every stored secret to them, and get only this key from the endpoint.
+    """
+    service = service or service_for(searchinfo, app)
+    try:
+        return key_from_splunk(searchinfo, realm, username, app=app, service=service), "storage/passwords"
+    except JevError as direct:
+        try:
+            return key_from_endpoint(searchinfo, app=app, service=service), "the use_jev endpoint"
+        except JevError as brokered:
+            if brokered.code != "endpoint_unavailable":
+                raise brokered
+            if direct.code == "auth_failed":
+                # splunkd registers a new endpoint only at startup
+                raise JevError("auth_failed", "%s (with jev_user, restart Splunk once after installing or upgrading "
+                                              "the app: %s)" % (NO_ACCESS, brokered.message))
+            raise direct
 
 
 class KVStoreCache(object):
@@ -92,3 +137,21 @@ class KVStoreCache(object):
         docs = list(docs)
         for start in range(0, len(docs), WRITE_BATCH):
             self._post("batch_save", docs[start:start + WRITE_BATCH], writing=True)
+
+    def purge(self, before):
+        """Delete answers created before the epoch `before` (on the accelerated `created` field).
+
+        The KV store does not report how many it deleted, so this returns None.
+        """
+        from splunklib.binding import HTTPError
+
+        try:
+            self.service.delete(self.path.rstrip("/"), owner="nobody", app=self.app,
+                                query=json.dumps({"created": {"$lt": int(before)}})).body.read()
+        except HTTPError as exc:
+            if exc.status in (401, 403):
+                raise CacheReadOnly("HTTP %d deleting from collections/%s" % (exc.status, self.collection))
+            raise CacheUnavailable("HTTP %d on collections/%s" % (exc.status, self.collection))
+        except (socket.error, OSError) as exc:
+            raise CacheUnavailable("%s: %s" % (type(exc).__name__, exc))
+        return None

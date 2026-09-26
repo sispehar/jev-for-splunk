@@ -7,6 +7,7 @@ whole search fast after a 401.
 from __future__ import annotations
 
 import email.utils
+import http.client
 import json
 import random
 import socket
@@ -210,7 +211,9 @@ class JevClient(object):
                 raise JevError("http_%d" % status, "HTTP %d: %s" % (status, text[:300]), status=status)
             except JevError:
                 raise
-            except (socket.timeout, urllib.error.URLError, OSError, ValueError) as exc:
+            # http.client.HTTPException covers a response cut short mid-body (IncompleteRead),
+            # which is not an OSError and would otherwise escape the retries.
+            except (socket.timeout, urllib.error.URLError, OSError, ValueError, http.client.HTTPException) as exc:
                 reason = _network_reason(exc)
                 if reason == "tls_verify":
                     raise JevError("network:tls_verify",

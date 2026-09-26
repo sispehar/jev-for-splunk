@@ -59,6 +59,17 @@
                 "primary": "ds_cost"
             }
         },
+        "table_sent": {
+            "type": "splunk.table",
+            "title": "What left Splunk: the fields each search sent to TypeSafe, by user and app",
+            "options": {
+                "count": 15,
+                "showInternalFields": false
+            },
+            "dataSources": {
+                "primary": "ds_sent"
+            }
+        },
         "table_errors": {
             "type": "splunk.table",
             "title": "Warnings and errors in jev.log",
@@ -101,6 +112,17 @@
                 }
             }
         },
+        "ds_sent": {
+            "type": "ds.search",
+            "name": "ds_sent",
+            "options": {
+                "query": "`jev_internal_log` \"summary\" requests>0 | stats sum(requests) AS requests sum(fresh) AS \"answers judged\" latest(_time) AS last BY user app label state_fields | convert ctime(last) | sort - requests",
+                "queryParameters": {
+                    "earliest": "$tr.earliest$",
+                    "latest": "$tr.latest$"
+                }
+            }
+        },
         "ds_errors": {
             "type": "ds.search",
             "name": "ds_errors",
@@ -117,7 +139,7 @@
         "type": "grid",
         "options": {
             "width": 1440,
-            "height": 916
+            "height": 1168
         },
         "globalInputs": [
             "input_tr"
@@ -154,11 +176,21 @@
                 }
             },
             {
-                "item": "table_errors",
+                "item": "table_sent",
                 "type": "block",
                 "position": {
                     "x": 0,
                     "y": 664,
+                    "w": 1440,
+                    "h": 240
+                }
+            },
+            {
+                "item": "table_errors",
+                "type": "block",
+                "position": {
+                    "x": 0,
+                    "y": 916,
                     "w": 1440,
                     "h": 240
                 }

@@ -22,7 +22,7 @@ def _apps(tmp_path, layout):
 def test_split_ref():
     assert split_ref("shop_areas") == (None, "shop_areas")
     assert split_ref("jev_shop_demo:shop_areas") == ("jev_shop_demo", "shop_areas")
-    for bad in ("../etc/passwd", "a/b", "", "app:"):
+    for bad in ("../etc/passwd", "a/b", "", "app:", "..:passwd", ".:x", "app:..", "..."):
         with pytest.raises(ResolveError):
             split_ref(bad)
 

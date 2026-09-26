@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from jev_core.config import load_config, parse_bool
+import pytest
+
+from jev_core.config import ConfigError, load_config, parse_bool
 
 
 def test_defaults_without_files():
@@ -15,6 +17,14 @@ def test_layering_and_coercion(app_root):
     assert cfg.maxevents == 5000 and len(cfg.sources) == 1
     cfg2 = load_config(app_root, overrides={"api": {"model": "jev-1.13.0"}, "defaults": {"threads": "5", "probs": "0"}})
     assert cfg2.model == "jev-1.13.0" and cfg2.threads == 5 and cfg2.probs is False
+
+
+def test_bad_value_names_the_file_and_setting(tmp_path):
+    (tmp_path / "local").mkdir()
+    (tmp_path / "local" / "jev.conf").write_text("[api]\ntimeout = thirty\n")
+    with pytest.raises(ConfigError) as info:
+        load_config(str(tmp_path))
+    assert "local" in str(info.value) and "[api] timeout = 'thirty' is not a number" in str(info.value)
 
 
 def test_parse_bool():

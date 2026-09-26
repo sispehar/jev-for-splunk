@@ -8,8 +8,10 @@ import pytest
 
 from jev_core.cache import CacheReadOnly, CacheUnavailable
 from jev_core.client import JevError
-from jev_splunk import KVStoreCache, key_from_splunk
+from jev_splunk import KEY_ENDPOINT, KVStoreCache, key_from_splunk, read_key
 from splunklib.binding import HTTPError
+
+KEY_PATH = "storage/passwords/jev_for_splunk%3Atypesafe_api_key%3A"
 
 
 class _Body(object):
@@ -60,9 +62,16 @@ class FakeService(object):
 
     def get(self, path, owner=None, app=None, **kwargs):
         self.calls.append(("GET", path, owner, app, kwargs))
-        if "get" in self.fail:
-            raise _http_error(self.fail["get"])
+        for target, status in self.fail.items():   # "get" fails every GET, a path prefix only its own
+            if target == "get" or path.startswith(target):
+                raise _http_error(status)
         return _Response(self.store.get(path, {"entry": []}))
+
+    def delete(self, path, owner=None, app=None, **kwargs):
+        self.calls.append(("DELETE", path, owner, app, kwargs))
+        if "delete" in self.fail:
+            raise _http_error(self.fail["delete"])
+        return _Response(b"")
 
 
 def _doc(key, created=2000000000):
@@ -97,8 +106,20 @@ def test_ttl_filter_and_status_mapping():
         KVStoreCache(FakeService(fail={"batch_save": 500})).put_many([_doc("a")])
 
 
+def test_purge_deletes_on_the_created_field():
+    service = FakeService()
+    assert KVStoreCache(service).purge(1700000000.7) is None     # the KV store does not count
+    method, path, owner, app, kwargs = service.calls[0]
+    assert (method, path, owner, app) == ("DELETE", "storage/collections/data/jev_cache", "nobody", "jev_for_splunk")
+    assert json.loads(kwargs["query"]) == {"created": {"$lt": 1700000000}}
+    with pytest.raises(CacheReadOnly):
+        KVStoreCache(FakeService(fail={"delete": 403})).purge(1)
+    with pytest.raises(CacheUnavailable):
+        KVStoreCache(FakeService(fail={"delete": 503})).purge(1)
+
+
 def test_key_from_splunk_reads_one_entry():
-    path = "storage/passwords/jev_for_splunk%3Atypesafe_api_key%3A"
+    path = KEY_PATH
     service = FakeService(store={path: {"entry": [{"content": {"clear_password": "sk-test"}}]}})
     assert key_from_splunk(None, "jev_for_splunk", "typesafe_api_key", service=service) == "sk-test"
     assert service.calls[0][1] == path and service.calls[0][3] == "jev_for_splunk"
@@ -107,7 +128,32 @@ def test_key_from_splunk_reads_one_entry():
     assert info.value.code == "api_key_missing" and "Setup page" in info.value.message
     with pytest.raises(JevError) as info:
         key_from_splunk(None, "jev_for_splunk", "typesafe_api_key", service=FakeService(fail={"get": 403}))
-    assert "list_storage_passwords" in info.value.message
+    assert "list_storage_passwords" in info.value.message and "jev_user" in info.value.message
+    with pytest.raises(JevError) as info:
+        key_from_splunk(None, "jev_for_splunk", "typesafe_api_key", service=FakeService(fail={"get": 500}))
+    assert info.value.code == "storage_error"
+
+
+def test_read_key_prefers_storage_passwords_then_the_use_jev_endpoint():
+    admin = FakeService(store={KEY_PATH: {"entry": [{"content": {"clear_password": "sk-direct"}}]}})
+    assert read_key(None, "jev_for_splunk", "typesafe_api_key", service=admin) == ("sk-direct", "storage/passwords")
+    assert len(admin.calls) == 1                                  # an admin never asks the endpoint
+    # a jev_user: no list_storage_passwords, so the endpoint (splunkd checks use_jev) serves the key
+    user = FakeService(store={KEY_ENDPOINT: {"key": "sk-endpoint"}}, fail={"storage/passwords": 403})
+    assert read_key(None, "jev_for_splunk", "typesafe_api_key", service=user) == ("sk-endpoint", "the use_jev endpoint")
+    assert user.calls[-1][1:4] == (KEY_ENDPOINT, "nobody", "jev_for_splunk")
+
+
+@pytest.mark.parametrize("fail,store,code,words", [
+    ({"storage/passwords": 403, KEY_ENDPOINT: 403}, {}, "auth_failed", "jev_user"),       # neither capability
+    ({"storage/passwords": 403}, {KEY_ENDPOINT: {"key": ""}}, "api_key_missing", "Setup page"),  # nothing stored
+    ({"storage/passwords": 403, KEY_ENDPOINT: 404}, {}, "auth_failed", "restart Splunk"),  # endpoint not loaded yet
+    ({KEY_ENDPOINT: 404}, {}, "api_key_missing", "Setup page"),  # an admin with no key: the direct answer stands
+])
+def test_read_key_errors_say_what_to_do(fail, store, code, words):
+    with pytest.raises(JevError) as info:
+        read_key(None, "jev_for_splunk", "typesafe_api_key", service=FakeService(store=store, fail=fail))
+    assert info.value.code == code and words in info.value.message, info.value.message
 
 
 def test_key_path_is_encoded_once_by_splunklib():
