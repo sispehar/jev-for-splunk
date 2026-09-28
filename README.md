@@ -21,6 +21,16 @@ index=support sourcetype=ticket
 ... | jev score message "How upset is the customer?" levels="Calm question; Annoyed; Angry" as upset | sort - upset
 ```
 
+A question can replace a pile of regexes. This one finds the Bash commands Claude Code ran with a secret
+on the command line, such as a password passed to `plink -pw`, without a pattern for each tool:
+
+```
+index=anthropic sourcetype=anthropic:api tool_name=Bash
+| jev noul tool_parameters "The command contains a password token or API key typed in plain text"
+| where jev_noul > 0.9
+| table _time jev_noul jev_noul_tokens tool_parameters
+```
+
 Answers are cached in the KV store, one per model, question and state (the fields you name), without
 the event text. Asking again, or asking the same question from a dashboard, only pays for events that
 were never judged. The full command reference, including batteries (several questions in one request),
