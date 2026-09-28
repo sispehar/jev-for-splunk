@@ -31,6 +31,8 @@ index=anthropic sourcetype=anthropic:api tool_name=Bash
 | table _time jev_noul jev_noul_tokens tool_parameters
 ```
 
+![The search in Splunk: 42 Bash commands with jev_noul above 0.9, the top ones passing a password to plink (redacted here)](docs/images/secrets-in-bash.png)
+
 Answers are cached in the KV store, one per model, question and state (the fields you name), without
 the event text. Asking again, or asking the same question from a dashboard, only pays for events that
 were never judged. The full command reference, including batteries (several questions in one request),
